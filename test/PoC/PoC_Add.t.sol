@@ -12,7 +12,7 @@ contract add is Test {
     // this holds for a and b are m
 
     int256 aMan = 1;
-    int256 aExp = 10;
+    int256 aExp = 20;
 
     int256 bMan = 1;
     int256 bExp = -28;
@@ -34,13 +34,6 @@ contract add is Test {
         packedFloat b_c_a = Float128.add(a, b_c);
 
     function test_poc_add() public {
-        // console.log("a.", packedFloat.unwrap(a));
-        // console.log("b.", packedFloat.unwrap(b));
-        // console.log("c.", packedFloat.unwrap(c));
-        // console.log("a_b.", packedFloat.unwrap(a_b));
-        // console.log("b_c.", packedFloat.unwrap(b_c));
-        // console.log("a_b_c.", packedFloat.unwrap(a_b_c));//5.736e76
-        // console.log("b_c_a.", packedFloat.unwrap(b_c_a));//0
         
         (int aMan_dec,int aExp_dec) = Float128.decode(a);
         (int bMan_dec,int bExp_dec) = Float128.decode(b);
