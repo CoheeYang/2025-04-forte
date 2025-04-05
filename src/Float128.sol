@@ -64,30 +64,35 @@ library Float128 {
         if (packedFloat.unwrap(a) == 0) return b;
         if (packedFloat.unwrap(b) == 0) return a;
         assembly {
+            //1.判断是否有大尾数
             let aL := gt(and(a, MANTISSA_L_FLAG_MASK), 0)
             let bL := gt(and(b, MANTISSA_L_FLAG_MASK), 0)
+            //2. 判断是否有减法
             isSubtraction := xor(and(a, MANTISSA_SIGN_MASK), and(b, MANTISSA_SIGN_MASK))
             // we extract the exponent and mantissas for both
+            //3.截断对应的信息
             let aExp := and(a, EXPONENT_MASK)
             let bExp := and(b, EXPONENT_MASK)
             let aMan := and(a, MANTISSA_MASK)
             let bMan := and(b, MANTISSA_MASK)
-            if iszero(or(aL, bL)) {
+            if iszero(or(aL, bL)) {//情况1.没有大尾数
                 // we add 38 digits of precision in the case of subtraction
-                if gt(aExp, bExp) {
-                    r := sub(aExp, shl(EXPONENT_BIT, MAX_DIGITS_M))
-                    let adj := sub(shr(EXPONENT_BIT, r), shr(EXPONENT_BIT, bExp))
-                    let neg := and(TWO_COMPLEMENT_SIGN_MASK, adj)
-                    if neg {
+                if gt(aExp, bExp) {//情况1.1 aExp > bExp 则将b的指数上升以对其a  //（此处 aExp=0, bExp=-56）
+                    //1.用中间指数r=aExp - 38
+                    r := sub(aExp, shl(EXPONENT_BIT, MAX_DIGITS_M))//左移38二进制exponent_bit(242)位。再拿aExp减去38Exp，得到rExp
+                    //2.调整额度为adj = r - bExp
+                    let adj := sub(shr(EXPONENT_BIT, r), shr(EXPONENT_BIT, bExp))//移回去再减去 // adj = aExp -38 - bExp, //-75 + bExp 
+                    let neg := and(TWO_COMPLEMENT_SIGN_MASK, adj)//判断正负
+                    if neg {//负的
                         bMan := mul(bMan, exp(BASE, sub(0, adj)))
                         aMan := mul(aMan, BASE_TO_THE_MAX_DIGITS_M)
                     }
-                    if iszero(neg) {
-                        bMan := sdiv(bMan, exp(BASE, adj))
-                        aMan := mul(aMan, BASE_TO_THE_MAX_DIGITS_M)
-                    }
+                    if iszero(neg) {//正的
+                        bMan := sdiv(bMan, exp(BASE, adj))//signed div, //  （10^37 /10^adj）
+                        aMan := mul(aMan, BASE_TO_THE_MAX_DIGITS_M)//aMna * 10e38 
+                    }//@audit 那么你们为什么要加这段呢？这段必然存在aExp-bExp>38，其实也我不用管b是不是触底，只要a和b差了这么多就会出问题
                 }
-                if gt(bExp, aExp) {
+                if gt(bExp, aExp) {//情况1.2
                     r := sub(bExp, shl(EXPONENT_BIT, MAX_DIGITS_M))
                     let adj := sub(shr(EXPONENT_BIT, r), shr(EXPONENT_BIT, aExp))
                     let neg := and(TWO_COMPLEMENT_SIGN_MASK, adj)
@@ -96,19 +101,19 @@ library Float128 {
                         bMan := mul(bMan, BASE_TO_THE_MAX_DIGITS_M)
                     }
                     if iszero(neg) {
-                        aMan := sdiv(aMan, exp(BASE, adj))
+                        aMan := sdiv(aMan, exp(BASE, adj))//bug 
                         bMan := mul(bMan, BASE_TO_THE_MAX_DIGITS_M)
                     }
                 }
                 // if exponents are the same, we don't need to adjust the mantissas. We just set the result's exponent
-                if eq(aExp, bExp) {
+                if eq(aExp, bExp) {//情况1.3
                     aMan := mul(aMan, BASE_TO_THE_MAX_DIGITS_M)
                     bMan := mul(bMan, BASE_TO_THE_MAX_DIGITS_M)
                     r := sub(aExp, shl(EXPONENT_BIT, MAX_DIGITS_M))
                     sameExponent := 1
                 }
             }
-            if or(aL, bL) {
+            if or(aL, bL) {//情况2.存在大尾情况
                 // we make sure both of them are size L before continuing
                 if iszero(aL) {
                     aMan := mul(aMan, BASE_TO_THE_DIGIT_DIFF)
@@ -154,6 +159,7 @@ library Float128 {
                 }
             }
             // now we convert to 2's complement to carry out the operation
+            //转换负号
             if and(b, MANTISSA_SIGN_MASK) {
                 bMan := sub(0, bMan)
             }
@@ -161,7 +167,7 @@ library Float128 {
                 aMan := sub(0, aMan)
             }
             // now we can add/subtract
-            addition := add(aMan, bMan)
+            addition := add(aMan, bMan) // 10^37 + 10^75
             // encoding the unnormalized result
             if and(TWO_COMPLEMENT_SIGN_MASK, addition) {
                 r := or(r, MANTISSA_SIGN_MASK) // assign the negative sign
@@ -177,7 +183,7 @@ library Float128 {
             assembly {
                 rExp := shr(EXPONENT_BIT, r)
             }
-            if (isSubtraction) {
+            if (isSubtraction) {//减法
                 // subtraction case can have a number of digits anywhere from 1 to 76
                 // we might get a normalized result, so we only normalize if necessary
                 if (
@@ -219,11 +225,12 @@ library Float128 {
                     let maxExp := sub(
                         sub(sub(add(ZERO_OFFSET, MAXIMUM_EXPONENT), DIGIT_DIFF_L_M), DIGIT_DIFF_76_L),
                         isGreaterThan76Digits
-                    )
+                    )// ((8192-18)-34)-4 -(1/0)
+                    //判断小尾
                     let _isM := or(eq(rExp, maxExp), lt(rExp, maxExp))
                     if _isM {
-                        addition := div(addition, BASE_TO_THE_MAX_DIGITS_M)
-                        r := add(r, shl(EXPONENT_BIT, MAX_DIGITS_M))
+                        addition := div(addition, BASE_TO_THE_MAX_DIGITS_M)//addition/10^38 bug 任意bMan小于10^38都会被无视
+                        r := add(r, shl(EXPONENT_BIT, MAX_DIGITS_M))//38左移242位，再加上r，原来是比如aExp-38，现在加回来
                     }
                     if iszero(_isM) {
                         addition := div(addition, BASE_TO_THE_DIFF_76_L)
@@ -1092,37 +1099,40 @@ library Float128 {
                 }
             }
             // we normalize only if necessary
-            if (
+            if (//情况1：数字位数既不是38位也不是72位时
                 !((mantissa <= int(MAX_M_DIGIT_NUMBER) && mantissa >= int(MIN_M_DIGIT_NUMBER)) ||
                     (mantissa <= int(MAX_L_DIGIT_NUMBER) && mantissa >= int(MIN_L_DIGIT_NUMBER)))
-            ) {
-                digitsMantissa = findNumberOfDigits(uint(mantissa));
+            ) {///1e-56
+                digitsMantissa = findNumberOfDigits(uint(mantissa));//|返回1
                 assembly {
-                    mantissaMultiplier := sub(digitsMantissa, MAX_DIGITS_M)
-                    let isResultL := slt(MAXIMUM_EXPONENT, add(exponent, mantissaMultiplier))
+                    mantissaMultiplier := sub(digitsMantissa, MAX_DIGITS_M)//减去38位 | mantissaMultiplier=38-1=37
+                    let isResultL := slt(MAXIMUM_EXPONENT, add(exponent, mantissaMultiplier))//signed less than, (-18 < 位数+指数-38)?，-18为规定的，保证在38位的情况下有18位的计算空间
+                    //这意味着一个实际超过20位的数字，就会被计算为L类型
                     if isResultL {
-                        mantissaMultiplier := sub(mantissaMultiplier, DIGIT_DIFF_L_M)
-                        float := or(float, MANTISSA_L_FLAG_MASK)
+                        mantissaMultiplier := sub(mantissaMultiplier, DIGIT_DIFF_L_M)//如果位数+指数超过范围，再减去34（减了38又减去34，共减去72）
+                        float := or(float, MANTISSA_L_FLAG_MASK)//// 标记为大尾数 241位的地方变成1 @unchecked
                     }
-                    exponent := add(exponent, mantissaMultiplier)
-                    let negativeMultiplier := and(TWO_COMPLEMENT_SIGN_MASK, mantissaMultiplier)
-                    if negativeMultiplier {
+                    
+                    exponent := add(exponent, mantissaMultiplier)//exponent加上位数差 |exponent=-37+-56
+                    let negativeMultiplier := and(TWO_COMPLEMENT_SIGN_MASK, mantissaMultiplier)//判断现在的位数差是正还是负
+
+                    if negativeMultiplier {//负数，比如只有16位，减去38，还剩22位，mantissa = mantissa * 10^22 |@audit 1e-56 走这里mantissa = 1x10^37 exponent = -37+-56,算小尾数
                         mantissa := mul(mantissa, exp(BASE, sub(0, mantissaMultiplier)))
                     }
-                    if iszero(negativeMultiplier) {
+                    if iszero(negativeMultiplier) {//为什么用iszero?而不是else来判断正数--因为没有else语法
                         mantissa := div(mantissa, exp(BASE, mantissaMultiplier))
                     }
                 }
-            } else if (
+            } else if (//情况2：数字位数是38位，且exponents大于-18情况（应该转为大尾数情况了）
                 (mantissa <= int(MAX_M_DIGIT_NUMBER) && mantissa >= int(MIN_M_DIGIT_NUMBER)) &&
                 exponent > MAXIMUM_EXPONENT
             ) {
                 assembly {
-                    mantissa := mul(mantissa, BASE_TO_THE_DIGIT_DIFF)
-                    exponent := sub(exponent, DIGIT_DIFF_L_M)
+                    mantissa := mul(mantissa, BASE_TO_THE_DIGIT_DIFF)//10^34
+                    exponent := sub(exponent, DIGIT_DIFF_L_M)//exp-34
                     float := add(float, MANTISSA_L_FLAG_MASK)
                 }
-            } else if ((mantissa <= int(MAX_L_DIGIT_NUMBER) && mantissa >= int(MIN_L_DIGIT_NUMBER))) {
+            } else if ((mantissa <= int(MAX_L_DIGIT_NUMBER) && mantissa >= int(MIN_L_DIGIT_NUMBER))) {//情况3：数字位属于大尾数72的情况
                 assembly {
                     float := add(float, MANTISSA_L_FLAG_MASK)
                 }
@@ -1167,9 +1177,9 @@ library Float128 {
     function findNumberOfDigits(uint x) internal pure returns (uint log) {
         assembly {
             if gt(x, 0) {
-                if gt(x, 9999999999999999999999999999999999999999999999999999999999999999) {
+                if gt(x, 9999999999999999999999999999999999999999999999999999999999999999) {//大于10^64 -1时，记录64位，并除以64
                     log := 64
-                    x := div(x, 10000000000000000000000000000000000000000000000000000000000000000)
+                    x := div(x, 10000000000000000000000000000000000000000000000000000000000000000)//10^64，有65位数字 @audit fuzzing成功 
                 }
                 if gt(x, 99999999999999999999999999999999) {
                     log := add(log, 32)

@@ -1,0 +1,13 @@
+
+testMode: "assertion"
+# deployContracts: [["0x1f", "Ln"], ["0x2f", "Ln"]]
+# cryticArgs: ["--compile-libraries=(Ln,0x2f)"]
+shrinkLimit: 200000
+workers: 4
+corpusDir: "crytic-export/corpus"
+
+filterBlacklist: false
+# filterFunctions: ["BasicMath.test_digits(uint256)"]
+# filterFunctions: ["BasicMath.test_exchange_add(int256,int256,int256,int256,int256,int256)"]
+# filterFunctions: ["BasicMath.test_simple_exchange_add(int256,int256,int256,int256)"]
+filterFunctions: ["BasicMath.test_sub_add_equalitiy(int256,int256,int256,int256)"]

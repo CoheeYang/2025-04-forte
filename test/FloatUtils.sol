@@ -7,7 +7,7 @@ import "src/Float128.sol";
 contract FloatUtils is Test {
     using Float128 for packedFloat;
 
-    int256 constant BOUNDS_LOW = -3000;
+    int256 constant BOUNDS_LOW = -3000;//exponents limits for float128
     int256 constant BOUNDS_HIGH = 3000;
 
     function _buildFFIMul128(
@@ -68,3 +68,5 @@ contract FloatUtils is Test {
         _aExp = bound(aExp, BOUNDS_LOW, BOUNDS_HIGH);
     }
 }
+
+
