@@ -70,9 +70,9 @@ library Ln {
             exponent := sub(shr(EXPONENT_BIT, and(input, EXPONENT_MASK)), ZERO_OFFSET)
         }
         if (
-            exponent == 0 - int(inputL ? Float128.MAX_DIGITS_L_MINUS_1 : Float128.MAX_DIGITS_M_MINUS_1) &&
-            mantissa == (inputL ? Float128.MIN_L_DIGIT_NUMBER : Float128.MIN_M_DIGIT_NUMBER)
-        ) return packedFloat.wrap(0);
+            exponent == 0 - int(inputL ? Float128.MAX_DIGITS_L_MINUS_1 : Float128.MAX_DIGITS_M_MINUS_1) && //exponent=37or71
+            mantissa == (inputL ? Float128.MIN_L_DIGIT_NUMBER : Float128.MIN_M_DIGIT_NUMBER)//尾数对应是1
+        ) return packedFloat.wrap(0);//ln1=0
         result = ln_helper(mantissa, exponent, inputL);
     }
 
@@ -84,36 +84,39 @@ library Ln {
      * @return result the log of the input from ln function
      */
     function ln_helper(uint mantissa, int exp, bool inputL) private pure returns (packedFloat result) {
-        int positiveExp = exp * -1;
-        if (
+        int positiveExp = exp * -1;//?不检查的吗？
+
+        ///情况1.大尾 && exp>-72 || 小尾 && exp>-38 （即x>1的情况，转为x<1的情况来解决）
+        if (//大尾&& 72>positiveExp  || 小尾&& 38>positiveExp   => 
             (inputL && int(Float128.MAX_DIGITS_L) > positiveExp) ||
             (!inputL && int(Float128.MAX_DIGITS_M) > positiveExp)
-        ) {
-            if (inputL) {
+        ) { 
+            if (inputL) {//大尾数将数还原到小尾数？ 
                 mantissa /= Float128.BASE_TO_THE_DIGIT_DIFF;
                 exp += int(Float128.DIGIT_DIFF_L_M);
             }
-
-            uint q1 = Float128.BASE_TO_THE_MAX_DIGITS_M_X_2 / mantissa;
-            uint r1 = Float128.BASE_TO_THE_MAX_DIGITS_M_X_2 % mantissa;
-            uint q2 = (Float128.BASE_TO_THE_MAX_DIGITS_M * r1) / mantissa;
-            uint one_over_argument_in_long_int = q1 * Float128.BASE_TO_THE_MAX_DIGITS_M + q2;
-            uint m10 = one_over_argument_in_long_int > Float128.MAX_76_DIGIT_NUMBER ? 77 : 76;
+            ///高精度倒数计算
+            uint q1 = Float128.BASE_TO_THE_MAX_DIGITS_M_X_2 / mantissa;//77位数，10^76/mantissa 
+            uint r1 = Float128.BASE_TO_THE_MAX_DIGITS_M_X_2 % mantissa;// 10^76 % mantissa
+            uint q2 = (Float128.BASE_TO_THE_MAX_DIGITS_M * r1) / mantissa;//10^38 *r1 %mantissa
+            uint one_over_argument_in_long_int = q1 * Float128.BASE_TO_THE_MAX_DIGITS_M + q2;//得到倒数
+            uint m10 = one_over_argument_in_long_int > Float128.MAX_76_DIGIT_NUMBER ? 77 : 76;//位数是否增加
 
             uint one_over_arguments_76 = one_over_argument_in_long_int;
             uint m76 = m10;
-            m76 -= Float128.DIGIT_DIFF_76_L;
-            one_over_arguments_76 /= Float128.BASE_TO_THE_DIFF_76_L;
-            if (m76 > Float128.MAX_DIGITS_L) {
+            m76 -= Float128.DIGIT_DIFF_76_L;// 76or77 -4
+            one_over_arguments_76 /= Float128.BASE_TO_THE_DIFF_76_L;//除10_000还原72位
+            if (m76 > Float128.MAX_DIGITS_L) {//还原如果是73位，补一下位数
                 --m76;
                 one_over_arguments_76 /= Float128.BASE;
             }
-            int exp_one_over_argument = 0 - int(Float128.MAX_DIGITS_M) - int(Float128.MAX_DIGITS_M_X_2) - exp;
+            int exp_one_over_argument = 0 - int(Float128.MAX_DIGITS_M) - int(Float128.MAX_DIGITS_M_X_2) - exp;//0-38-76
             packedFloat a = packedFloat.wrap(0).sub(
                 ln(Float128.toPackedFloat(int(one_over_arguments_76), 0 - int(m76)))
-            );
+            );//
             result = a.sub(Float128.toPackedFloat((exp_one_over_argument + int(m10)), 0).mul(ln10));
-        } else {
+        }//情况2.其他所有情况 
+        else {
             int256 m10 = inputL ? int(Float128.MAX_DIGITS_L) + exp : int(Float128.MAX_DIGITS_M) + exp;
             exp -= m10;
 

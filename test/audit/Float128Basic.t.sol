@@ -3,10 +3,12 @@ pragma solidity ^0.8.24;
 import "forge-std/console2.sol";
 import "src/Float128.sol";
 import "test/FloatUtils.sol";
+
 //forge test test/audit/Float128Basic.t.sol -vvvv
-contract BasicMath is FloatUtils {
+contract FoundryMath is FloatUtils {
     int constant ZERO_OFFSET_NEG = -8192;
     event Log(string, int256, int256, int256, int256, int256, int256);
+    event result(string, uint256, string, uint256);
 
     function zero_helper(int aMan, int aExp, int bMan, int bExp, int cMan, int cExp) internal pure returns (int256 _aExp, int256 _bExp, int256 _cExp) {
         //将0的指数设置为-8192
@@ -23,10 +25,8 @@ contract BasicMath is FloatUtils {
         _cExp = exps[2];
     }
 
-
-
     // (x + y) + z == x + (y + z)
-    function test_exchange_add(int aMan, int aExp, int bMan, int bExp, int cMan, int cExp) public  {
+    function test_exchange_add(int aMan, int aExp, int bMan, int bExp, int cMan, int cExp) public {
         //先定测试边界
         (aMan, aExp, bMan, bExp) = setBounds(aMan, aExp, bMan, bExp);
         (cMan, cExp) = setBounds(cMan, cExp);
@@ -34,7 +34,7 @@ contract BasicMath is FloatUtils {
         //将0的指数设置为-8192
         (aExp, bExp, cExp) = zero_helper(aMan, aExp, bMan, bExp, cMan, cExp);
 
-         emit Log("selected numbers", aMan, aExp, bMan, bExp, cMan, cExp);
+        emit Log("selected numbers", aMan, aExp, bMan, bExp, cMan, cExp);
 
         //开始计算
         packedFloat a = Float128.toPackedFloat(aMan, aExp);
@@ -48,23 +48,45 @@ contract BasicMath is FloatUtils {
         packedFloat b_c = Float128.add(b, c);
         packedFloat b_c_a = Float128.add(a, b_c);
 
-    
         console.log("a_b_c.", packedFloat.unwrap(a_b_c));
         console.log("b_c_a.", packedFloat.unwrap(b_c_a));
         assertTrue(Float128.eq(a_b_c, b_c_a));
-
     }
 
+    // forge test test/audit/Float128Basic.t.sol --mt test_sub_add_equalitiy -vvvv
+    // add(x,-y) = sub(x,y)
+    function test_sub_add_equalitiy(int aMan, int aExp, int bMan, int bExp) public {
+        //先定测试边界
+        (aMan, aExp, bMan, bExp) = setBounds(aMan, aExp, bMan, bExp);
+
+        //将0的指数设置为-8192
+        (aExp, bExp,) = zero_helper(aMan, aExp, bMan, bExp,0,0);
+
+        emit Log("selected numbers", aMan, aExp, bMan, bExp, 0, 0);
+
+        //开始计算
+        packedFloat a = Float128.toPackedFloat(aMan, aExp);
+        packedFloat b = Float128.toPackedFloat(bMan, bExp);
+
+        packedFloat neg_b = Float128.toPackedFloat(-bMan, bExp);
+
+        // add(x,-y) = sub(x,y)
+
+        packedFloat add_result = Float128.add(a, neg_b);
+        packedFloat sub_result = Float128.sub(a, b);
+
+        emit result("add_result.", packedFloat.unwrap(add_result), "sub_result.", packedFloat.unwrap(sub_result));
+        assert(Float128.eq(add_result, sub_result));
+    }
 
     // (x * y) * z == x * (y * z)
-    function test_exchange_mul(int aMan, int aExp, int bMan, int bExp, int cMan, int cExp) public  {
+    function test_exchange_mul(int aMan, int aExp, int bMan, int bExp, int cMan, int cExp) public {
         //先定测试边界
         (aMan, aExp, bMan, bExp) = setBounds(aMan, aExp, bMan, bExp);
         (cMan, cExp) = setBounds(cMan, cExp);
 
-      //将0的指数设置为-8192
+        //将0的指数设置为-8192
         (aExp, bExp, cExp) = zero_helper(aMan, aExp, bMan, bExp, cMan, cExp);
-        
 
         emit Log("selected numbers", aMan, aExp, bMan, bExp, cMan, cExp);
         //开始计算
@@ -72,25 +94,16 @@ contract BasicMath is FloatUtils {
         packedFloat b = Float128.toPackedFloat(bMan, bExp);
         packedFloat c = Float128.toPackedFloat(cMan, cExp);
 
-
-    // (x * y) * z == x * (y * z)
+        // (x * y) * z == x * (y * z)
         packedFloat a_b = Float128.mul(a, b);
         packedFloat a_b_c = Float128.mul(a_b, c);
 
         packedFloat b_c = Float128.mul(b, c);
         packedFloat b_c_a = Float128.mul(a, b_c);
 
-
         console.log("a_b_c.", packedFloat.unwrap(a_b_c));
         console.log("b_c_a.", packedFloat.unwrap(b_c_a));
 
         assertTrue(Float128.eq(a_b_c, b_c_a));
-
     }
-
-
-
-
-
-
 }

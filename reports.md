@@ -32,7 +32,7 @@ For illustration purpose, let's assume aExp is larger. This intends to normalize
 
 Because `addition= aMan x 10^38 + bMan x 10^38 / 10^(aExp-bExp)`, and `addition/10^38 = aMan + bMan/10^(aExp-bExp)`.
 
-`bMan` is a number between `[10^37 , 10^38-1]`. Thus, if `aExp-bExp>38`, bMan/10^(aExp-bExp) is always less than 1
+`bMan` is a 38-digit number between `[10^37 , 10^38-1]`. Thus, if `aExp-bExp>38`, bMan/10^(aExp-bExp) is always less than 1
 
 Moreover, `aExp-bExp> 38` always holds if `adj>0`, because `adj= aExp -38 - bExp` (see [L77-L84](https://github.com/code-423n4/2025-04-forte/blob/4d6694f68e80543885da78666e38c0dc7052d992/src/Float128.sol#L77-L84))
 
@@ -40,7 +40,7 @@ Moreover, `aExp-bExp> 38` always holds if `adj>0`, because `adj= aExp -38 - bExp
 
 
 ## PoC
-Try the following code, the following code shows that `(a+b)+c != a+(b+c)` because this issue.
+Try the following code, the following code shows that `(a+b)+c != a+(b+c)` due to this issue.
 
 This decimal loss occurs only when normal addition process. And this issue dispears when subtraction or large-size mantissa are involved
 
@@ -157,7 +157,7 @@ Ran 1 test suite in 2.69s (598.29µs CPU time): 1 tests passed, 0 failed, 0 skip
 
 
 
-# [H-1] : add() function would have decimal loss for `sdiv()` why not change it to `mul()`?
+# [L-1] : add() function would have decimal loss for `sdiv()` why not change it to `mul()`?
 
 
 ## Root Cause
@@ -190,13 +190,55 @@ There would be decimal loss in this situation 如果aE-bE> 75 就可能出现dec
 
 
 
-# 
-现在的问题是，
-为什么1+出现了loss
-而 -1 + b没出现
 
 
 
-Think about the following situtation:
-- `a = 1`, then `aMan = 10^37`,`aExp = -37`
-- `b = 1e-38`then `bMan = 10^37`,`bExp = -75`
+# [H-2] `hasExtraDigit` condition leads to decimal loss when converting large-size mantissa result to medium-size result
+## Basic Context 
+In `mul()`, the function first checks the exitence of large-size mantissa, and convert the other medium-size mantissa into large-size mantissa if large-size mantissa exits. 
+
+Then it multiples two large-size mantissa to get the result which is converted into medium-size mantissa if the exponent less or equal to`maxExp` (In this case the flag `Loperation` is 0).
+
+But during the multiplication stage, `aMan x bMan` might generate extra digits(eg.2x5=10,which two one digit numbers generate a two digit number).
+
+Thus, `hasExtraDigit := gt(rMan, MAX_L_DIGIT_NUMBER)` is used to check if `rMan` is a number that has extra digit,so that we can calibrate 73 or 72 digit result back to 38 digit result properly. 
+
+To handle 73 digits result, the `rMan` will be divided by `10^35`, and this is where decimal loss occurs.
+
+
+## Root Cause 
+This issue occurs only when a large-size mantissa number times a medium-size mantissa number.
+```solidity
+               if iszero(Loperation) {//scale down the result to 38 digits
+                    if hasExtraDigit {//the result has 73 digits
+                        rMan := div(rMan, BASE_TO_THE_DIGIT_DIFF_PLUS_1)//rMan/10^35，
+                        rExp := add(rExp, DIGIT_DIFF_L_M_PLUS_1)//+35
+                    }
+```
+The root cause for this issue is that `mul()` converts a medium-size mantissa into a large-size mantissa by simply timing `BASE_TO_THE_DIGIT_DIFF(10^34)` (see [L475-L482](https://github.com/code-423n4/2025-04-forte/blob/4d6694f68e80543885da78666e38c0dc7052d992/src/Float128.sol#L475-L482)) ,and adopted 10^35 to scale down the result when 73 digits exits (see [L507-L511](https://github.com/code-423n4/2025-04-forte/blob/4d6694f68e80543885da78666e38c0dc7052d992/src/Float128.sol#L507-L511)). 
+
+
+And this method would erase the last one digit information if a 73-digit `rMan` has 39 valid digits and 34 zero digits resulting a decimal loss.
+
+**For example:**
+
+23 digits, large-size mantissa `a`:
+`aMan= 50000000000000000000005` 
+`aExp = 0`
+
+16 digits, medium-size mantissa `b`:
+`bMan = 2000000000000003`
+`cExp = -20`
+
+The result `rMan` before division is `100000000000000150000010000000000000015..0000` with 39 valid digits, and in 34 zero digits in the form of large-size mantissa. 
+
+During the division process,`BASE_TO_THE_DIGIT_DIFF_PLUS_1(10^35)` can remove the last number information 5, making the result different from origin.
+
+
+## Impact
+
+This introduces potential decimal loss to defi protocal, and they cannot sense and choose to preserve large-size mantissa because scaling down process is automated and no other `mul()` function can be used.
+
+## Recommended mitigation steps
+
+Judge the valid digits before division, or create a `mul()` function that allow protocals to choose whether to preserves the large-size mantissa result just like `div(packedFloat a, packedFloat b, bool rL)`.
